@@ -69,6 +69,12 @@ jobs:
                    python-is-python3; do
           sudo apt-get install -y "$pkg" || echo "optional package $pkg unavailable, skipped"
         done
+        # kconfig (savedefconfig / olddefconfig) needs a C compiler for the
+        # target arch, so pull in the GNU cross toolchain as well.
+        sudo apt-get install -y gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi || {
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
+        }
         mkdir -p ~/.cache/ccache_mikernel
         ccache -M 10G
 
