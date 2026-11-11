@@ -58,30 +58,36 @@ jobs:
         fetch-depth: 1
 
     - name: Set up Environment
+      timeout-minutes: 15
       run: |
         export DEBIAN_FRONTEND=noninteractive
-        sudo -E apt-get update -o Acquire::Retries=2
-        # Required tools: if any of these is missing the build cannot run, so
-        # install them first and fail fast.
-        sudo -E apt-get install -y --no-install-recommends \
+        APT="sudo -E apt-get -y -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20"
+
+        # apt-get update can stall for tens of minutes on a bad mirror day; the
+        # runner image already ships a usable index, so a failed update is not
+        # fatal as long as the packages below resolve.
+        timeout 300 $APT update || echo "apt update skipped (slow or failed)"
+
+        # Required tools. These must succeed.
+        timeout 900 $APT install --no-install-recommends \
           ccache build-essential bc bison flex git curl wget zip unzip \
-          libssl-dev libncurses-dev zlib1g-dev python3 \
-          gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
-        # Optional helpers: probe each name with apt-cache policy (cheap) and
-        # only then install the resolvable ones, so a package the image no
-        # longer ships cannot make apt install nothing at all.
+          libssl-dev libncurses-dev libelf-dev zlib1g-dev \
+          python3 gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
+          || { echo "required packages failed to install"; exit 1; }
+
+        # Optional helpers: only install the names the image can resolve.
         OPT=""
-        for p in gawk gperf imagemagick libelf-dev lz4 libxml2 libxml2-utils \
-                 lzop pngcrush rsync schedtool squashfs-tools xsltproc \
+        for p in gawk gperf imagemagick lz4 libxml2 libxml2-utils lzop \
+                 pngcrush rsync schedtool squashfs-tools xsltproc \
                  python-is-python3; do
-          if apt-cache policy "$p" 2>/dev/null | grep -q "Candidate:" &&
-             ! apt-cache policy "$p" 2>/dev/null | grep -q "Candidate: (none)"; then
+          if apt-cache policy "$p" 2>/dev/null | grep -q "Candidate: [0-9]"; then
             OPT="$OPT $p"
           else
             echo "skipping unavailable package: $p"
           fi
         done
-        [ -n "$OPT" ] && sudo -E apt-get install -y --no-install-recommends $OPT || true
+        [ -n "$OPT" ] && timeout 600 $APT install --no-install-recommends $OPT || true
+
         for b in ccache make clang aarch64-linux-gnu-gcc python3; do
           command -v "$b" >/dev/null || { echo "MISSING required tool: $b"; exit 1; }
         done
