@@ -98,29 +98,36 @@ jobs:
         done
         [ -n "$OPT" ] && timeout 600 $APT install --no-install-recommends $OPT || true
 
-        # zyc-clang ships ld.lld linked against libxml2.so.2; without it every
-        # clang driver invocation dies with "libxml2.so.2: cannot open shared
-        # object file". Ubuntu 25.10+ renamed the runtime to libxml2-16 with a
-        # new soname (libxml2.so.16) and no longer ships libxml2.so.2, so no
-        # package on a resolute runner can ever satisfy it. Extract the real
-        # 2.9.14 runtime from the noble pool instead; if the pool fetch fails,
-        # fall back to a soname symlink (lld only touches a small stable
-        # subset of the API, and only for Windows manifest merging, which a
+        # zyc-clang's ld.lld is dynamically linked against libraries from an
+        # older Ubuntu that resolute no longer ships: libxml2.so.2 (renamed to
+        # libxml2-16 with soname libxml2.so.16 in Ubuntu 25.10+) and ICU 74
+        # (resolute ships a newer soname). No distro package can satisfy it,
+        # so pull the real runtimes from the noble pool into a private compat
+        # dir and register it with ldconfig. If a pool fetch fails, fall back
+        # to a soname symlink for libxml2 (lld only touches a small stable
+        # subset of that API, and only for Windows manifest merging, which a
         # kernel build never exercises).
-        if ! ldconfig -p | grep -q "libxml2.so.2"; then
-          echo "distro does not provide libxml2.so.2; fetching noble runtime"
-          NOBLE_DEB="http://archive.ubuntu.com/ubuntu/pool/main/libx/libxml2/libxml2_2.9.14+dfsg-1.3ubuntu3.10_amd64.deb"
-          if timeout 120 wget --tries=2 -q -O /tmp/libxml2-compat.deb "$NOBLE_DEB"; then
-            sudo mkdir -p /opt/libxml2-compat /usr/local/libxml2-compat/lib
-            sudo dpkg-deb -x /tmp/libxml2-compat.deb /opt/libxml2-compat
-            sudo cp -a /opt/libxml2-compat/usr/lib/x86_64-linux-gnu/libxml2.so.2* \
-              /usr/local/libxml2-compat/lib/ 2>/dev/null || true
-            echo "/usr/local/libxml2-compat/lib" | sudo tee /etc/ld.so.conf.d/libxml2-compat.conf >/dev/null
-            sudo ldconfig
+        COMPAT=/usr/local/compat-libs/lib
+        sudo mkdir -p /usr/local/compat-libs "$COMPAT"
+        for DEB in \
+          http://archive.ubuntu.com/ubuntu/pool/main/libx/libxml2/libxml2_2.9.14+dfsg-1.3ubuntu3.10_amd64.deb \
+          http://archive.ubuntu.com/ubuntu/pool/main/i/icu/libicu74_74.2-1ubuntu3.1_amd64.deb; do
+          F="/tmp/compat-$(basename "$DEB")"
+          D="/tmp/compat-extract-$(basename "$DEB" .deb)"
+          if timeout 120 wget --tries=2 -q -O "$F" "$DEB"; then
+            sudo mkdir -p "$D"
+            sudo dpkg-deb -x "$F" "$D"
+            sudo cp -a "$D"/usr/lib/x86_64-linux-gnu/. "$COMPAT/"
+          else
+            echo "WARN: could not fetch compat deb $DEB"
           fi
-        fi
-        if ! ldconfig -p | grep -q "libxml2.so.2"; then
-          echo "noble deb unavailable; symlinking libxml2.so.2 -> libxml2.so.16"
+        done
+        echo "/usr/local/compat-libs/lib" | sudo tee /etc/ld.so.conf.d/compat-libs.conf >/dev/null
+        sudo ldconfig
+        ls "$COMPAT" || true
+        # Fall back to a soname symlink if the noble libxml2 deb was missed.
+        if ! ldconfig -p | grep -q "libxml2.so.2" && [ ! -e "$COMPAT/libxml2.so.2" ]; then
+          echo "noble libxml2 unavailable; symlinking libxml2.so.2 -> libxml2.so.16"
           SO16="$(ldconfig -p | awk '/libxml2\.so\.16/{print $NF; exit}')"
           if [ -n "$SO16" ]; then
             sudo ln -sf "$SO16" /usr/lib/x86_64-linux-gnu/libxml2.so.2
@@ -128,8 +135,8 @@ jobs:
           fi
         fi
         ldconfig -p | grep -q "libxml2.so.2" \
+          || [ -e "$COMPAT/libxml2.so.2" ] \
           || [ -e /usr/lib/x86_64-linux-gnu/libxml2.so.2 ] \
-          || [ -e /usr/local/libxml2-compat/lib/libxml2.so.2 ] \
           || { echo "MISSING libxml2 runtime"; exit 1; }
 
         for b in ccache make clang aarch64-linux-gnu-gcc python3; do
@@ -161,9 +168,17 @@ jobs:
         test -s clang.tar.gz || { echo "could not download zyc-clang"; exit 1; }
         tar -zxf clang.tar.gz
         "$HOME/zyc-clang/bin/clang" --version
-        # Ground-truth check: ld.lld is the binary that needs libxml2.so.2.
-        # If it cannot start, the kernel link would fail far later.
+        # Ground-truth checks: ld.lld is the binary that needs the compat
+        # libs (libxml2.so.2, ICU 74). Fail here with the full list of
+        # missing libraries instead of dying mid-kernel-link later.
         "$HOME/zyc-clang/bin/ld.lld" --version
+        MISSING="$(find "$HOME/zyc-clang/bin" -maxdepth 1 -type f -exec ldd {} + 2>/dev/null | grep 'not found' | awk '{print $1}' | sort -u || true)"
+        if [ -n "$MISSING" ]; then
+          echo "toolchain binaries report missing shared libraries:"
+          echo "$MISSING"
+          exit 1
+        fi
+        echo "no missing shared libraries in toolchain"
 
     - name: Run Build Script
       run: |
