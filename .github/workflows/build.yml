@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       device:
-        description: 'Target Device Code (设备代号)'
+        description: 'Target device codename'
         required: true
         default: 'elish'
         type: choice
@@ -28,7 +28,7 @@ on:
         type: boolean
         default: true
       target_os:
-        description: 'Target OS (目标系统)'
+        description: 'Target OS'
         required: true
         type: choice
         default: 'miui'
