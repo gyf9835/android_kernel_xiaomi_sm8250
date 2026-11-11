@@ -459,6 +459,11 @@ build_target() {
                -e '/^# CONFIG_KSU_SUSFS is not set/d' \
                "${OUT_DIR}/.config"
         echo "CONFIG_KSU_MANUAL_HOOK=y" >> "${OUT_DIR}/.config"
+        # Let BakaSU hook setuid / init-rc / input through LSM instead of asking
+        # for extra edits in kernel/sys.c; these are the defaults on 4.19 too,
+        # but state them explicitly because olddefconfig is free to reconsider.
+        echo "CONFIG_KSU_MANUAL_HOOK_AUTO_SETUID_HOOK=y" >> "${OUT_DIR}/.config"
+        echo "CONFIG_KSU_MANUAL_HOOK_AUTO_INPUT_HOOK=y" >> "${OUT_DIR}/.config"
     fi
 
     # 3. MIUI configurations
@@ -517,10 +522,19 @@ build_target() {
     # the build much later, after a full kernel compile.
     if [ "$ENABLE_KSU" -eq 1 ]; then
         echo "[*] Verifying KernelSU manual hooks..."
-        for pair in "kernel/sys.c:ksu_handle_setresuid"                     "fs/exec.c:ksu_handle_execveat"                     "fs/open.c:ksu_handle_faccessat"                     "fs/read_write.c:ksu_handle_sys_read"                     "fs/stat.c:ksu_handle_stat"                     "kernel/reboot.c:ksu_handle_sys_reboot"                     "drivers/input/input.c:ksu_handle_input_handle_event"; do
+        for pair in "fs/exec.c:ksu_handle_execveat" \
+                    "fs/open.c:ksu_handle_faccessat" \
+                    "fs/read_write.c:ksu_handle_sys_read" \
+                    "fs/stat.c:ksu_handle_stat" \
+                    "kernel/reboot.c:ksu_handle_sys_reboot" \
+                    "drivers/input/input.c:ksu_handle_input_handle_event" ; do
             f="${pair%%:*}"; sym="${pair##*:}"
             grep -q "$sym" "$f" || { echo "[!] missing hook $sym in $f"; exit 1; }
         done
+        if ! grep -q "^CONFIG_KSU_MANUAL_HOOK_AUTO_SETUID_HOOK=y" "${OUT_DIR}/.config"; then
+            grep -q "ksu_handle_setresuid" kernel/sys.c || {
+                echo "[!] missing ksu_handle_setresuid in kernel/sys.c"; exit 1; }
+        fi
         echo "[+] All manual hooks present."
     fi
 
