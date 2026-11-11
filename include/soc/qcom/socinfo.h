@@ -320,6 +320,33 @@ enum subset_cluster_type {
 	NUM_CLUSTERS_MAX,
 };
 
+/*
+ * Xiaomi device platform ids, derived from the socinfo hw_platform
+ * subtype by get_hw_version_platform(). Values follow the MiCode
+ * sm8250 device kernels (elish-r-oss and friends).
+ */
+#define HARDWARE_PLATFORM_UNKNOWN 0
+#define HARDWARE_PLATFORM_CMI  1
+#define HARDWARE_PLATFORM_UMI  2
+#define HARDWARE_PLATFORM_LMI  3
+#define HARDWARE_PLATFORM_PIPA  4
+#define HARDWARE_PLATFORM_CAS  7
+#define HARDWARE_PLATFORM_APOLLO  8
+#define HARDWARE_PLATFORM_ALIOTH  9
+#define HARDWARE_PLATFORM_THYME  10
+#define HARDWARE_PLATFORM_ENUMA  11
+#define HARDWARE_PLATFORM_ELISH  12
+#define HARDWARE_PLATFORM_PSYCHE  13
+#define HARDWARE_PLATFORM_MUNCH  15
+#define HARDWARE_PLATFORM_DAGU  16
+/* Picasso family (sm7250) numbering; only referenced by
+ * CONFIG_BOARD_XIAOMI_SM7250 code, which an sm8250 build never enables. */
+#define HARDWARE_PLATFORM_VANGOGH  2
+#define HARDWARE_PLATFORM_PICASSO  3
+#define HARDWARE_PLATFORM_MONET  4
+
+uint32_t get_hw_version_platform(void);
+
 enum msm_cpu socinfo_get_msm_cpu(void);
 uint32_t socinfo_get_id(void);
 uint32_t socinfo_get_version(void);
