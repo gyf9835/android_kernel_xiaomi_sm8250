@@ -60,31 +60,28 @@ jobs:
     - name: Set up Environment
       run: |
         export DEBIAN_FRONTEND=noninteractive
-        # One apt transaction instead of ~20 sequential installs. Packages that
-        # the runner image no longer ships (libxml2 on Ubuntu 26, ...) are
-        # filtered out first: a single unavailable name makes apt install none.
-        sudo apt-get update -o Acquire::Retries=3
-        WANT="bc bison build-essential ccache curl flex gawk git gnupg gperf \
-              imagemagick libncurses-dev libssl-dev libelf-dev lz4 libxml2 \
-              libxml2-utils lzop pngcrush rsync schedtool squashfs-tools \
-              xsltproc zip zlib1g-dev python3 python-is-python3 \
-              gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi"
-        AVAIL=$(apt-cache pkgnames | sort -u)
-        PKGS=""
-        for p in $WANT; do
-          if echo "$AVAIL" | grep -qx "$p"; then
-            PKGS="$PKGS $p"
+        sudo -E apt-get update -o Acquire::Retries=2
+        # Required tools: if any of these is missing the build cannot run, so
+        # install them first and fail fast.
+        sudo -E apt-get install -y --no-install-recommends \
+          ccache build-essential bc bison flex git curl wget zip unzip \
+          libssl-dev libncurses-dev zlib1g-dev python3 \
+          gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
+        # Optional helpers: probe each name with apt-cache policy (cheap) and
+        # only then install the resolvable ones, so a package the image no
+        # longer ships cannot make apt install nothing at all.
+        OPT=""
+        for p in gawk gperf imagemagick libelf-dev lz4 libxml2 libxml2-utils \
+                 lzop pngcrush rsync schedtool squashfs-tools xsltproc \
+                 python-is-python3; do
+          if apt-cache policy "$p" 2>/dev/null | grep -q "Candidate:" &&
+             ! apt-cache policy "$p" 2>/dev/null | grep -q "Candidate: (none)"; then
+            OPT="$OPT $p"
           else
             echo "skipping unavailable package: $p"
           fi
         done
-        echo "installing:$PKGS"
-        for attempt in 1 2 3; do
-          sudo apt-get install -y --no-install-recommends $PKGS && break
-          echo "apt attempt $attempt failed"
-          sudo apt-get -f install -y || true
-          sleep 10
-        done
+        [ -n "$OPT" ] && sudo -E apt-get install -y --no-install-recommends $OPT || true
         for b in ccache make clang aarch64-linux-gnu-gcc python3; do
           command -v "$b" >/dev/null || { echo "MISSING required tool: $b"; exit 1; }
         done
