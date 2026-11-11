@@ -167,6 +167,11 @@ jobs:
         done
         test -s clang.tar.gz || { echo "could not download zyc-clang"; exit 1; }
         tar -zxf clang.tar.gz
+        # Register the toolchain's own lib dir (libclang.so.16, libomp.so,
+        # libomptarget.so.16, ...) with the loader: the release binaries
+        # carry no RPATH, so auxiliary tools cannot resolve them otherwise.
+        echo "$HOME/zyc-clang/lib" | sudo tee /etc/ld.so.conf.d/zyc-clang.conf >/dev/null
+        sudo ldconfig
         "$HOME/zyc-clang/bin/clang" --version
         # Ground-truth checks: ld.lld is the binary that needs the compat
         # libs (libxml2.so.2, ICU 74). Fail here with the full list of
