@@ -72,10 +72,7 @@ jobs:
         # resolver if the default one cannot answer.
         if ! getent hosts archive.ubuntu.com >/dev/null 2>&1; then
           echo "DNS resolution failed, switching to public resolvers"
-          sudo tee /etc/resolv.conf >/dev/null <<'RESOLV'
-nameserver 1.1.1.1
-nameserver 8.8.8.8
-RESOLV
+          printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' | sudo tee /etc/resolv.conf >/dev/null
           getent hosts archive.ubuntu.com || { echo "DNS still broken"; exit 1; }
         fi
 
