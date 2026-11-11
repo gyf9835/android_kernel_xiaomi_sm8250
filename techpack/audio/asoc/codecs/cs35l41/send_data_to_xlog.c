@@ -1,6 +1,16 @@
 #include "send_data_to_xlog.h"
 #include <linux/debugfs.h>
 
+/*
+ * The upstream xlogchar character driver (xlogchar_kwrite) is not part
+ * of this tree, so the diagnostic channel degrades to kernel logging
+ * only. Keep the prototype declared in send_data_to_xlog.h.
+ */
+ssize_t xlogchar_kwrite(const char __user *buf, size_t count)
+{
+	return count;
+}
+
 char msg_format[] = "{\"name\":\"dc_detection\",\"audio_event\":{\"dc_reason\":\"%s\"},\"dgt\":\"null\",\"audio_ext\":\"null\" }";
 
 #define MAX_LEN 512
