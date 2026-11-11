@@ -260,10 +260,19 @@ extern int ksu_handle_input_handle_event(unsigned int *type, unsigned int *code,
 
 static void input_handle_event(struct input_dev *dev,
 			       unsigned int type, unsigned int code, int value)
-{
+{""", "input.c: input event hook prototype"),
+
+    # -Wdeclaration-after-statement is -Werror here, so the hook call must go
+    # AFTER the leading declarations of input_handle_event: split the
+    # "int disposition = input_get_disposition(...)" declaration.
+    ("drivers/input/input.c",
+     "	int disposition = input_get_disposition(dev, type, code, &value);",
+     """	int disposition;
 #ifdef CONFIG_KSU_MANUAL_HOOK
 	ksu_handle_input_handle_event(&type, &code, &value);
-#endif""", "input.c: input event hook"),
+#endif
+	disposition = input_get_disposition(dev, type, code, &value);""",
+     "input.c: disposition split for -Wdeclaration-after-statement"),
 ]
 
 
