@@ -566,8 +566,23 @@ build_target() {
         mkdir -p "anykernel/kernels/${OS_TYPE}/"
         
         cp "${OUT_DIR}/arch/arm64/boot/Image" "anykernel/kernels/${OS_TYPE}/"
-        cp "${OUT_DIR}/arch/arm64/boot/dtb" "anykernel/kernels/${OS_TYPE}/"
-        
+        # With CONFIG_BUILD_ARM64_DT_OVERLAY=y kbuild keeps the base dtbs
+        # next to their sources (out/.../dts/vendor/qcom/kona*.dtb) instead
+        # of producing a consolidated boot/dtb blob. Rebuild the single blob
+        # AnyKernel flashes to the dtb partition from whatever kbuild made.
+        if [ -f "${OUT_DIR}/arch/arm64/boot/dtb" ]; then
+            cp "${OUT_DIR}/arch/arm64/boot/dtb" "anykernel/kernels/${OS_TYPE}/"
+        elif [ -f "${OUT_DIR}/arch/arm64/boot/dtb.img" ]; then
+            cp "${OUT_DIR}/arch/arm64/boot/dtb.img" "anykernel/kernels/${OS_TYPE}/dtb"
+        else
+            DTBS="$(find "${OUT_DIR}/arch/arm64/boot/dts" -name '*.dtb' | sort)"
+            if [ -z "$DTBS" ]; then
+                echo "[-] no dtb artifacts found for the dtb blob"; exit 1
+            fi
+            echo "[*] rebuilding dtb blob from $(echo "$DTBS" | wc -l) base dtbs (overlay build)"
+            cat $DTBS > "anykernel/kernels/${OS_TYPE}/dtb"
+        fi
+
         if [ -f "${OUT_DIR}/arch/arm64/boot/dtbo.img" ]; then
             cp "${OUT_DIR}/arch/arm64/boot/dtbo.img" "anykernel/kernels/${OS_TYPE}/"
         fi
