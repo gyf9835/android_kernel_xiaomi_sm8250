@@ -7588,7 +7588,7 @@ static struct snd_soc_dai_link tert_mi2s_rx_cs35l41_dai_links[] = {
 		.ops = &kona_tdm_be_ops,
 		.ignore_suspend = 1,
 		.ignore_pmdown_time = 1,
-		.init = &cs35l41_init,
+		//.init = &cs35l41_init,
 	},
   	{
 		.name = LPASS_BE_TERT_TDM_RX_1,
@@ -7604,7 +7604,7 @@ static struct snd_soc_dai_link tert_mi2s_rx_cs35l41_dai_links[] = {
 		.ops = &kona_tdm_be_ops,
 		.ignore_suspend = 1,
 		.ignore_pmdown_time = 1,
-		.init = &cs35l41_init,
+		//.init = &cs35l41_init,
 	},
 #else
 	{
@@ -7621,7 +7621,7 @@ static struct snd_soc_dai_link tert_mi2s_rx_cs35l41_dai_links[] = {
 		.ops = &msm_mi2s_be_ops,
 		.ignore_suspend = 1,
 		.ignore_pmdown_time = 1,
-		.init = &cs35l41_init,
+		//.init = &cs35l41_init,
 	},
 #endif
 };
@@ -7752,7 +7752,7 @@ static struct snd_soc_dai_link sec_mi2s_rx_cs35l41_dai_links[] = {
 		.ops = &msm_mi2s_be_ops,
 		.ignore_suspend = 1,
 		.ignore_pmdown_time = 1,
-		.init = &cs35l41_init,
+		//.init = &cs35l41_init,
 	},
 };
 
