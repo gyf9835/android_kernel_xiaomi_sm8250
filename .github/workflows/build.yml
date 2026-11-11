@@ -59,22 +59,23 @@ jobs:
 
     - name: Set up Environment
       run: |
-        sudo apt-get update
-        # Runner images differ (Ubuntu 24.04 vs 26.04): install each tool
-        # individually so a renamed/optional package cannot abort the job.
-        for pkg in bc bison build-essential ccache curl flex gawk git gnupg \
-                   gperf imagemagick libncurses-dev libssl-dev libelf-dev \
-                   liblz4-tool lz4 libxml2 libxml2-utils lzop pngcrush rsync \
-                   schedtool squashfs-tools xsltproc zip zlib1g-dev python3 \
-                   python-is-python3; do
-          sudo apt-get install -y "$pkg" || echo "optional package $pkg unavailable, skipped"
+        export DEBIAN_FRONTEND=noninteractive
+        # One apt transaction is far faster than ~20 sequential installs on the
+        # Ubuntu 26 runner, and retries absorb the occasional mirror hiccup.
+        sudo apt-get update -o Acquire::Retries=3
+        PKGS="bc bison build-essential ccache curl flex gawk git gnupg gperf \
+              imagemagick libncurses-dev libssl-dev libelf-dev lz4 libxml2 \
+              libxml2-utils lzop pngcrush rsync schedtool squashfs-tools \
+              xsltproc zip zlib1g-dev python3 python-is-python3 \
+              gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi"
+        for attempt in 1 2 3; do
+          sudo apt-get install -y --no-install-recommends $PKGS && break
+          echo "apt attempt $attempt failed, retrying after cleanup"
+          sudo apt-get -f install -y || true
+          sleep 10
         done
-        # kconfig (savedefconfig / olddefconfig) needs a C compiler for the
-        # target arch, so pull in the GNU cross toolchain as well.
-        sudo apt-get install -y gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi || {
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
-        }
+        command -v clang || true
+        command -v aarch64-linux-gnu-gcc || echo "WARN: cross gcc missing"
         mkdir -p ~/.cache/ccache_mikernel
         ccache -M 10G
 
@@ -92,8 +93,15 @@ jobs:
       run: |
         mkdir -p $HOME/zyc-clang
         cd $HOME/zyc-clang
-        wget -q https://github.com/ZyCromerZ/Clang/releases/download/16.0.6-20260807-release/Clang-16.0.6-20260807.tar.gz
-        tar -zxvf Clang-16.0.6-20260807.tar.gz
+        URL=https://github.com/ZyCromerZ/Clang/releases/download/16.0.6-20260807-release/Clang-16.0.6-20260807.tar.gz
+        for attempt in 1 2 3 4; do
+          wget --timeout=120 --tries=2 -q -O clang.tar.gz "$URL" && break
+          echo "clang download attempt $attempt failed"
+          sleep 10
+        done
+        test -s clang.tar.gz || { echo "could not download zyc-clang"; exit 1; }
+        tar -zxf clang.tar.gz
+        "$HOME/zyc-clang/bin/clang" --version
 
     - name: Run Build Script
       run: |

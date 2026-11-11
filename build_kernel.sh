@@ -77,21 +77,10 @@ mkdir -p "$CCACHE_DIR"
 # ==========================================
 if [ "$ENABLE_KSU" -eq 1 ]; then
     echo "==========================================="
-    echo " [*] Initializing KernelSU (BakaSU) Setup"
+    echo " [*] Initializing KernelSU (ReSukiSU) Setup"
     echo "==========================================="
-    echo "[*] Downloading and running the BakaSU/ReSukiSU remote setup script..."
+    echo "[*] Downloading and running ReSukiSU remote setup script..."
     curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
-
-    echo "[*] Applying KernelSU manual-hook patches (non-GKI 4.19)..."
-
-    # BakaSU/ReSukiSU on a 4.19 non-GKI tree can only use CONFIG_KSU_MANUAL_HOOK.
-    # The hooks are inserted by an anchored script instead of a patch file so a
-    # differing tree layout fails loudly rather than silently dropping root.
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    if ! python3 "${SCRIPT_DIR}/scripts/patch_ksu_manual_hook.py" "$(pwd)"; then
-        echo "[!] KernelSU manual hook patching failed."
-        exit 1
-    fi
     echo "[+] KernelSU setup finished."
 fi
 
@@ -299,28 +288,6 @@ if [ ! -f "$DEFCONFIG_PATH" ]; then
 fi
 
 # ==========================================
-# Board / DTBO selection
-# ==========================================
-# arch/arm64/boot/dts/vendor/qcom/Makefile gates every Xiaomi dtbo overlay on
-# CONFIG_BOARD_XIAOMI && CONFIG_BOARD_XIAOMI_SM8250. Those symbols have no
-# Kconfig entry in this tree, so the gate can never be true and no device
-# overlay (e.g. elish-sm8250-overlay.dtbo) is ever emitted. Without it the
-# flashed dtbo does not describe the panel, which is what broke the display
-# density on elish. Enable the gates explicitly for the target device.
-# These are plain make variables (no Kconfig entry exists), so they are passed
-# on the make command line below rather than merged into .config.
-BOARD_MAKE_VARS=(
-    "CONFIG_BOARD_XIAOMI=y"
-    "CONFIG_BOARD_XIAOMI_SM8250=y"
-    "CONFIG_BUILD_ARM64_DT_OVERLAY=y"
-    "CONFIG_BOARD_$(echo "${DEVICE_NAME}" | tr '[:lower:]' '[:upper:]')=y"
-)
-
-echo "==========================================="
-echo " [*] Board/dtbo gates for ${DEVICE_NAME}: ${BOARD_MAKE_VARS[*]}"
-echo "==========================================="
-
-# ==========================================
 # AnyKernel3 Setup
 # ==========================================
 echo "==========================================="
@@ -358,10 +325,6 @@ build_target() {
         HOSTCC="ccache clang"
         CROSS_COMPILE="${CROSS_COMPILE}"
         CROSS_COMPILE_ARM32="${CROSS_COMPILE_ARM32}"
-        CONFIG_BOARD_XIAOMI=y
-        CONFIG_BOARD_XIAOMI_SM8250=y
-        CONFIG_BUILD_ARM64_DT_OVERLAY=y
-        "CONFIG_BOARD_$(echo "${DEVICE_NAME}" | tr '[:lower:]' '[:upper:]')=y"
     )
 
     echo "[*] Cleaning ${OUT_DIR}..."
@@ -437,12 +400,11 @@ build_target() {
 
     # 2. KernelSU configurations
     if [ "$ENABLE_KSU" -eq 1 ]; then
-        echo "[*] Injecting KernelSU manual-hook configurations..."
+        echo "[*] Injecting KernelSU & SUSFS configurations..."
         scripts/config --file "${OUT_DIR}/.config" \
             -e KSU \
             -e THREAD_INFO_IN_TASK \
-            -d KSU_TRACEPOINT_HOOK \
-            -e KSU_MANUAL_HOOK
+            -e KSU_SUSFS
     fi
 
     # 3. MIUI configurations
