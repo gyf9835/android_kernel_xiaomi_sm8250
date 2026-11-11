@@ -77,10 +77,29 @@ mkdir -p "$CCACHE_DIR"
 # ==========================================
 if [ "$ENABLE_KSU" -eq 1 ]; then
     echo "==========================================="
-    echo " [*] Initializing KernelSU (ReSukiSU) Setup"
+    echo " [*] Initializing KernelSU (BakaSU) Setup"
     echo "==========================================="
-    echo "[*] Downloading and running ReSukiSU remote setup script..."
+    echo "[*] Downloading and running the BakaSU/ReSukiSU remote setup script..."
     curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
+
+    echo "[*] Applying KernelSU manual-hook patches (non-GKI 4.19)..."
+
+    # The hook method is a Kconfig choice defaulting to the GKI-2.0 tracepoint
+    # hook. Flip the default so olddefconfig cannot silently restore it.
+    if [ -f KernelSU/kernel/Kconfig ]; then
+        sed -i 's/^	default KSU_TRACEPOINT_HOOK$/	default KSU_MANUAL_HOOK/' KernelSU/kernel/Kconfig
+        grep -n "default KSU_MANUAL_HOOK" KernelSU/kernel/Kconfig || {
+            echo "[!] could not set KSU_MANUAL_HOOK as the Kconfig default"; exit 1; }
+    fi
+
+    # BakaSU/ReSukiSU on a 4.19 non-GKI tree can only use CONFIG_KSU_MANUAL_HOOK.
+    # The hooks are inserted by an anchored script instead of a patch file so a
+    # differing tree layout fails loudly rather than silently dropping root.
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    if ! python3 "${SCRIPT_DIR}/scripts/patch_ksu_manual_hook.py" "$(pwd)"; then
+        echo "[!] KernelSU manual hook patching failed."
+        exit 1
+    fi
     echo "[+] KernelSU setup finished."
 fi
 
@@ -288,6 +307,28 @@ if [ ! -f "$DEFCONFIG_PATH" ]; then
 fi
 
 # ==========================================
+# Board / DTBO selection
+# ==========================================
+# arch/arm64/boot/dts/vendor/qcom/Makefile gates every Xiaomi dtbo overlay on
+# CONFIG_BOARD_XIAOMI && CONFIG_BOARD_XIAOMI_SM8250. Those symbols have no
+# Kconfig entry in this tree, so the gate can never be true and no device
+# overlay (e.g. elish-sm8250-overlay.dtbo) is ever emitted. Without it the
+# flashed dtbo does not describe the panel, which is what broke the display
+# density on elish. Enable the gates explicitly for the target device.
+# These are plain make variables (no Kconfig entry exists), so they are passed
+# on the make command line below rather than merged into .config.
+BOARD_MAKE_VARS=(
+    "CONFIG_BOARD_XIAOMI=y"
+    "CONFIG_BOARD_XIAOMI_SM8250=y"
+    "CONFIG_BUILD_ARM64_DT_OVERLAY=y"
+    "CONFIG_BOARD_$(echo "${DEVICE_NAME}" | tr '[:lower:]' '[:upper:]')=y"
+)
+
+echo "==========================================="
+echo " [*] Board/dtbo gates for ${DEVICE_NAME}: ${BOARD_MAKE_VARS[*]}"
+echo "==========================================="
+
+# ==========================================
 # AnyKernel3 Setup
 # ==========================================
 echo "==========================================="
@@ -325,6 +366,10 @@ build_target() {
         HOSTCC="ccache clang"
         CROSS_COMPILE="${CROSS_COMPILE}"
         CROSS_COMPILE_ARM32="${CROSS_COMPILE_ARM32}"
+        CONFIG_BOARD_XIAOMI=y
+        CONFIG_BOARD_XIAOMI_SM8250=y
+        CONFIG_BUILD_ARM64_DT_OVERLAY=y
+        "CONFIG_BOARD_$(echo "${DEVICE_NAME}" | tr '[:lower:]' '[:upper:]')=y"
     )
 
     echo "[*] Cleaning ${OUT_DIR}..."
@@ -400,11 +445,20 @@ build_target() {
 
     # 2. KernelSU configurations
     if [ "$ENABLE_KSU" -eq 1 ]; then
-        echo "[*] Injecting KernelSU & SUSFS configurations..."
-        scripts/config --file "${OUT_DIR}/.config" \
-            -e KSU \
-            -e THREAD_INFO_IN_TASK \
-            -e KSU_SUSFS
+        echo "[*] Injecting KernelSU manual-hook configurations..."
+        # KSU_TRACEPOINT_HOOK / KSU_MANUAL_HOOK / KSU_SUSFS are a Kconfig choice
+        # whose default is TRACEPOINT_HOOK (GKI 2.0 only). "scripts/config -d"
+        # cannot deselect a choice entry, so rewrite the .config directly:
+        # a 4.19 non-GKI kernel must use the manual hook.
+        scripts/config --file "${OUT_DIR}/.config" -e KSU -e THREAD_INFO_IN_TASK
+        sed -i -e '/^CONFIG_KSU_TRACEPOINT_HOOK/d' \
+               -e '/^# CONFIG_KSU_TRACEPOINT_HOOK is not set/d' \
+               -e '/^CONFIG_KSU_MANUAL_HOOK/d' \
+               -e '/^# CONFIG_KSU_MANUAL_HOOK is not set/d' \
+               -e '/^CONFIG_KSU_SUSFS/d' \
+               -e '/^# CONFIG_KSU_SUSFS is not set/d' \
+               "${OUT_DIR}/.config"
+        echo "CONFIG_KSU_MANUAL_HOOK=y" >> "${OUT_DIR}/.config"
     fi
 
     # 3. MIUI configurations
@@ -457,6 +511,17 @@ build_target() {
     if [ "$ENABLE_DROIDSPACES" -eq 1 ]; then
         echo "[*] Merging DroidSpaces configurations..."
         scripts/kconfig/merge_config.sh -O "${OUT_DIR}/" -m "${OUT_DIR}/.config" "${DS_CONFIG_FRAG}"
+    fi
+
+    # Fail fast if the manual hooks did not make it into the tree: BakaSU aborts
+    # the build much later, after a full kernel compile.
+    if [ "$ENABLE_KSU" -eq 1 ]; then
+        echo "[*] Verifying KernelSU manual hooks..."
+        for pair in "kernel/sys.c:ksu_handle_setresuid"                     "fs/exec.c:ksu_handle_execveat"                     "fs/open.c:ksu_handle_faccessat"                     "fs/read_write.c:ksu_handle_sys_read"                     "fs/stat.c:ksu_handle_stat"                     "kernel/reboot.c:ksu_handle_sys_reboot"                     "drivers/input/input.c:ksu_handle_input_handle_event"; do
+            f="${pair%%:*}"; sym="${pair##*:}"
+            grep -q "$sym" "$f" || { echo "[!] missing hook $sym in $f"; exit 1; }
+        done
+        echo "[+] All manual hooks present."
     fi
 
     # We always need to re-evaluate dependencies because BBG is injected unconditionally
