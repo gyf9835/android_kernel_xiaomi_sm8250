@@ -57,6 +57,17 @@ enum {
 	HW_PLATFORM_SBC = 24,
 	HW_PLATFORM_HDK = 31,
 	HW_PLATFORM_IDP = 34,
+
+	/* Xiaomi device platform subtypes as programmed in the CDT */
+	HW_PLATFORM_J1  = 36,
+	HW_PLATFORM_J11 = 37,
+	HW_PLATFORM_J1S = 41,
+	HW_PLATFORM_J3S = 42,
+	HW_PLATFORM_J2  = 43,
+	HW_PLATFORM_K11A = 44,
+	HW_PLATFORM_J2S = 45,
+	HW_PLATFORM_K81 = 46,
+	HW_PLATFORM_K81A = 47,
 	HW_PLATFORM_INVALID
 };
 
@@ -78,7 +89,16 @@ const char *hw_platform[] = {
 	[HW_PLATFORM_STP] = "STP",
 	[HW_PLATFORM_SBC] = "SBC",
 	[HW_PLATFORM_HDK] = "HDK",
-	[HW_PLATFORM_IDP] = "IDP"
+	[HW_PLATFORM_IDP] = "IDP",
+	[HW_PLATFORM_J2] = "UMI",
+	[HW_PLATFORM_J1] = "CMI",
+	[HW_PLATFORM_J11] = "LMI",
+	[HW_PLATFORM_J1S] = "CAS",
+	[HW_PLATFORM_J3S] = "APOLLO",
+	[HW_PLATFORM_K11A] = "ALIOTH",
+	[HW_PLATFORM_J2S] = "THYME",
+	[HW_PLATFORM_K81] = "ENUMA",
+	[HW_PLATFORM_K81A] = "ELISH"
 };
 
 enum {
@@ -579,6 +599,29 @@ uint32_t socinfo_get_platform_type(void)
 		: 0;
 }
 
+
+/*
+ * Map the CDT hw_platform subtype onto the Xiaomi device codenames the
+ * audio machine driver (techpack/audio/asoc/kona.c) compares against.
+ */
+uint32_t get_hw_version_platform(void)
+{
+	uint32_t hw_type = socinfo_get_platform_type();
+
+	switch (hw_type) {
+	case HW_PLATFORM_J2:	return HARDWARE_PLATFORM_UMI;
+	case HW_PLATFORM_J1:	return HARDWARE_PLATFORM_CMI;
+	case HW_PLATFORM_J11:	return HARDWARE_PLATFORM_LMI;
+	case HW_PLATFORM_J1S:	return HARDWARE_PLATFORM_CAS;
+	case HW_PLATFORM_J3S:	return HARDWARE_PLATFORM_APOLLO;
+	case HW_PLATFORM_K11A:	return HARDWARE_PLATFORM_ALIOTH;
+	case HW_PLATFORM_J2S:	return HARDWARE_PLATFORM_THYME;
+	case HW_PLATFORM_K81:	return HARDWARE_PLATFORM_ENUMA;
+	case HW_PLATFORM_K81A:	return HARDWARE_PLATFORM_ELISH;
+	default:		return HARDWARE_PLATFORM_UNKNOWN;
+	}
+}
+EXPORT_SYMBOL(get_hw_version_platform);
 
 uint32_t socinfo_get_platform_version(void)
 {
