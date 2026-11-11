@@ -66,6 +66,19 @@ jobs:
         # apt-get update can stall for tens of minutes on a bad mirror day; the
         # runner image already ships a usable index, so a failed update is not
         # fatal as long as the packages below resolve.
+        # Runners occasionally come up with a broken resolver
+        # ("Temporary failure resolving 'archive.ubuntu.com'"), which makes apt
+        # hang until the step timeout. Verify DNS first and borrow a public
+        # resolver if the default one cannot answer.
+        if ! getent hosts archive.ubuntu.com >/dev/null 2>&1; then
+          echo "DNS resolution failed, switching to public resolvers"
+          sudo tee /etc/resolv.conf >/dev/null <<'RESOLV'
+nameserver 1.1.1.1
+nameserver 8.8.8.8
+RESOLV
+          getent hosts archive.ubuntu.com || { echo "DNS still broken"; exit 1; }
+        fi
+
         timeout 300 $APT update || echo "apt update skipped (slow or failed)"
 
         # Required tools. These must succeed.
