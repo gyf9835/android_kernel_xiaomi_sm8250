@@ -81,7 +81,7 @@ jobs:
         # Required tools. These must succeed.
         timeout 900 $APT install --no-install-recommends \
           ccache build-essential bc bison flex git curl wget zip unzip \
-          libssl-dev libncurses-dev libelf-dev zlib1g-dev \
+          libssl-dev libncurses-dev libelf-dev zlib1g-dev libxml2-dev \
           python3 gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
           || { echo "required packages failed to install"; exit 1; }
 
@@ -97,6 +97,16 @@ jobs:
           fi
         done
         [ -n "$OPT" ] && timeout 600 $APT install --no-install-recommends $OPT || true
+
+        # zyc-clang ships ld.lld linked against libxml2; without it the arm64
+        # vdso link dies with "libxml2.so.2: cannot open shared object file".
+        if ! ldconfig -p | grep -q "libxml2.so.2"; then
+          echo "libxml2 runtime missing, trying alternative package names"
+          for p in libxml2 libxml2t64 libxml2-16 libxml2-dev; do
+            timeout 300 $APT install --no-install-recommends "$p" 2>/dev/null && break
+          done
+        fi
+        ldconfig -p | grep -q "libxml2.so.2" || { echo "MISSING libxml2 runtime"; exit 1; }
 
         for b in ccache make clang aarch64-linux-gnu-gcc python3; do
           command -v "$b" >/dev/null || { echo "MISSING required tool: $b"; exit 1; }
