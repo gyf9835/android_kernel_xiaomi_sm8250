@@ -353,6 +353,11 @@ echo "[*] Adjusting AnyKernel3..."
 # this build right after do.devicecheck instead.
 sed -i -E "/^device\.name[0-9]*=/d" anykernel/anykernel.sh
 sed -i "/^do\.devicecheck=1/a device.name1=${DEVICE_NAME}" anykernel/anykernel.sh
+# HyperOS renames ro.build.flavor (no longer missi/qssi-user), which made
+# the template's ROM detection fall through to the AOSP branch and abort
+# with "There is no kernel for your OS in this zip!". Default to the MIUI
+# kernel dir instead: this repo only builds MIUI-target kernels anyway.
+sed -i 's|    \*) os="aosp"; os_string="AOSP ROM";;|    *) os="miui"; os_string="MIUI/HyperOS ROM";;|' anykernel/anykernel.sh
 echo "[*] AnyKernel3 adjusted successfully."
 echo "==========================================="
 
