@@ -339,8 +339,14 @@ echo "[*] Cloning AnyKernel3..."
 git clone https://github.com/UtsavBalar1231/AnyKernel3 -b kona --single-branch --depth=1 anykernel
 echo "[+] AnyKernel3 cloned successfully."
 echo "[*] Adjusting AnyKernel3..."
-sed -i -E "s/^device\.name[0-9]+=.*$//" anykernel/anykernel.sh
-sed -i "s/^device\.name[0-9]*=$/device.name1=${DEVICE_NAME}/" anykernel/anykernel.sh
+# Rebuild the device whitelist for the target board: the upstream kona
+# template lists only alioth/apollo/lmi/cmi/umi/munch, and the old two-step
+# sed (blank the lines, then match "device.name[0-9]*=") never matched the
+# blanked lines, leaving an empty whitelist that aborts every flash with
+# "Unsupported device!". Delete the template entries and insert the one for
+# this build right after do.devicecheck instead.
+sed -i -E "/^device\.name[0-9]*=/d" anykernel/anykernel.sh
+sed -i "/^do\.devicecheck=1/a device.name1=${DEVICE_NAME}" anykernel/anykernel.sh
 echo "[*] AnyKernel3 adjusted successfully."
 echo "==========================================="
 
