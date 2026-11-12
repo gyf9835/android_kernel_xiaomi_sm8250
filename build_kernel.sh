@@ -106,6 +106,11 @@ fi
 # ==========================================
 # Baseband-guard Setup
 # ==========================================
+SKIP_BBG=1   # TEMP: boot-hang bisect on HyperOS, remove after diagnosis
+if [ "$SKIP_BBG" = "1" ]; then
+    echo "[*] SKIP_BBG=1: skipping Baseband-guard entirely"
+fi
+if [ "$SKIP_BBG" != "1" ]; then
 echo "==========================================="
 echo " [*] Initializing Baseband-guard Setup"
 echo "==========================================="
@@ -116,6 +121,7 @@ echo "[*] Patching security/Kconfig for baseband_guard..."
 sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/selinux/selinux,baseband_guard/ } }' security/Kconfig
 echo "[+] Baseband-guard setup finished."
 echo "==========================================="
+fi
 
 # ==========================================
 # DroidSpaces Setup
@@ -446,8 +452,10 @@ build_target() {
     # ----------------------------------------------------
     
     # 1. Baseband-guard configuration (Always applied)
-    echo "[*] Injecting Baseband-guard configuration..."
-    scripts/config --file "${OUT_DIR}/.config" -e BBG
+    if [ "$SKIP_BBG" != "1" ]; then
+        echo "[*] Injecting Baseband-guard configuration..."
+        scripts/config --file "${OUT_DIR}/.config" -e BBG
+    fi
 
     # 2. KernelSU configurations
     if [ "$ENABLE_KSU" -eq 1 ]; then
