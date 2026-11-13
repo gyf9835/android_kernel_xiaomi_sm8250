@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       device:
-        description: 'Target Device Code (设备代号)'
+        description: 'Target device codename'
         required: true
-        default: 'lmi'
+        default: 'elish'
         type: choice
         options:
           - alioth
@@ -23,15 +23,15 @@ on:
           - thyme
           - umi
       ksu:
-        description: 'Enable KernelSU (ReSukiSU)'
+        description: 'Enable KernelSU (ReSukiSU + SuSFS)'
         required: true
         type: boolean
-        default: false
+        default: true
       target_os:
-        description: 'Target OS (目标系统)'
+        description: 'Target OS'
         required: true
         type: choice
-        default: 'both'
+        default: 'miui'
         options:
           - aosp
           - miui
@@ -40,68 +40,175 @@ on:
         description: 'Enable DroidSpaces support'
         required: true
         type: boolean
-        default: false
+        default: true
+
+permissions:
+  contents: write
 
 jobs:
   build-kernel:
-    name: Build ${{ github.event.inputs.device }} | KSU:${{ github.event.inputs.ksu }} | OS:${{ github.event.inputs.target_os }} | DS:${{ github.event.inputs.droidspaces }}
+    name: Build ${{ inputs.device }} | KSU:${{ inputs.ksu }} | OS:${{ inputs.target_os }} | DS:${{ inputs.droidspaces }}
     runs-on: ubuntu-latest
-    
+    timeout-minutes: 180
+
     steps:
     - name: Checkout Repository
-      uses: actions/checkout@v7
+      uses: actions/checkout@v4
       with:
         fetch-depth: 1
 
     - name: Set up Environment
+      timeout-minutes: 15
       run: |
-        sudo apt-get update
-        sudo apt-get install -y bc bison build-essential ccache curl flex gawk \
-          git gnupg gperf imagemagick libncurses-dev \
-          lib32readline-dev lib32z1-dev liblz4-tool \
-          libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync \
-          schedtool squashfs-tools xsltproc zip zlib1g-dev python3
-          
+        export DEBIAN_FRONTEND=noninteractive
+        APT="sudo -E apt-get -y -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20"
+
+        # apt-get update can stall for tens of minutes on a bad mirror day; the
+        # runner image already ships a usable index, so a failed update is not
+        # fatal as long as the packages below resolve.
+        # Runners occasionally come up with a broken resolver
+        # ("Temporary failure resolving 'archive.ubuntu.com'"), which makes apt
+        # hang until the step timeout. Verify DNS first and borrow a public
+        # resolver if the default one cannot answer.
+        if ! getent hosts archive.ubuntu.com >/dev/null 2>&1; then
+          echo "DNS resolution failed, switching to public resolvers"
+          printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' | sudo tee /etc/resolv.conf >/dev/null
+          getent hosts archive.ubuntu.com || { echo "DNS still broken"; exit 1; }
+        fi
+
+        timeout 300 $APT update || echo "apt update skipped (slow or failed)"
+
+        # Required tools. These must succeed.
+        timeout 900 $APT install --no-install-recommends \
+          ccache build-essential bc bison flex git curl wget zip unzip \
+          libssl-dev libncurses-dev libelf-dev zlib1g-dev libxml2-dev \
+          python3 gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
+          || { echo "required packages failed to install"; exit 1; }
+
+        # Optional helpers: only install the names the image can resolve.
+        OPT=""
+        for p in gawk gperf imagemagick lz4 libxml2 libxml2-utils lzop \
+                 pngcrush rsync schedtool squashfs-tools xsltproc \
+                 python-is-python3; do
+          if apt-cache policy "$p" 2>/dev/null | grep -q "Candidate: [0-9]"; then
+            OPT="$OPT $p"
+          else
+            echo "skipping unavailable package: $p"
+          fi
+        done
+        [ -n "$OPT" ] && timeout 600 $APT install --no-install-recommends $OPT || true
+
+        # zyc-clang's ld.lld is dynamically linked against libraries from an
+        # older Ubuntu that resolute no longer ships: libxml2.so.2 (renamed to
+        # libxml2-16 with soname libxml2.so.16 in Ubuntu 25.10+) and ICU 74
+        # (resolute ships a newer soname). No distro package can satisfy it,
+        # so pull the real runtimes from the noble pool into a private compat
+        # dir and register it with ldconfig. If a pool fetch fails, fall back
+        # to a soname symlink for libxml2 (lld only touches a small stable
+        # subset of that API, and only for Windows manifest merging, which a
+        # kernel build never exercises).
+        COMPAT=/usr/local/compat-libs/lib
+        sudo mkdir -p /usr/local/compat-libs "$COMPAT"
+        for DEB in \
+          http://archive.ubuntu.com/ubuntu/pool/main/libx/libxml2/libxml2_2.9.14+dfsg-1.3ubuntu3.10_amd64.deb \
+          http://archive.ubuntu.com/ubuntu/pool/main/i/icu/libicu74_74.2-1ubuntu3.1_amd64.deb; do
+          F="/tmp/compat-$(basename "$DEB")"
+          D="/tmp/compat-extract-$(basename "$DEB" .deb)"
+          if timeout 120 wget --tries=2 -q -O "$F" "$DEB"; then
+            sudo mkdir -p "$D"
+            sudo dpkg-deb -x "$F" "$D"
+            sudo cp -a "$D"/usr/lib/x86_64-linux-gnu/. "$COMPAT/"
+          else
+            echo "WARN: could not fetch compat deb $DEB"
+          fi
+        done
+        echo "/usr/local/compat-libs/lib" | sudo tee /etc/ld.so.conf.d/compat-libs.conf >/dev/null
+        sudo ldconfig
+        ls "$COMPAT" || true
+        # Fall back to a soname symlink if the noble libxml2 deb was missed.
+        if ! ldconfig -p | grep -q "libxml2.so.2" && [ ! -e "$COMPAT/libxml2.so.2" ]; then
+          echo "noble libxml2 unavailable; symlinking libxml2.so.2 -> libxml2.so.16"
+          SO16="$(ldconfig -p | awk '/libxml2\.so\.16/{print $NF; exit}')"
+          if [ -n "$SO16" ]; then
+            sudo ln -sf "$SO16" /usr/lib/x86_64-linux-gnu/libxml2.so.2
+            sudo ldconfig
+          fi
+        fi
+        ldconfig -p | grep -q "libxml2.so.2" \
+          || [ -e "$COMPAT/libxml2.so.2" ] \
+          || [ -e /usr/lib/x86_64-linux-gnu/libxml2.so.2 ] \
+          || { echo "MISSING libxml2 runtime"; exit 1; }
+
+        for b in ccache make clang aarch64-linux-gnu-gcc python3; do
+          command -v "$b" >/dev/null || { echo "MISSING required tool: $b"; exit 1; }
+        done
+        mkdir -p ~/.cache/ccache_mikernel
+        ccache -M 10G
+
     - name: Cache ccache
-      uses: actions/cache@v6
+      uses: actions/cache@v4
       with:
         path: ~/.cache/ccache_mikernel
-        key: ${{ runner.os }}-kernel-ccache-${{ github.event.inputs.device }}-${{ github.run_id }}
+        key: ${{ runner.os }}-kernel-ccache-${{ inputs.device }}-${{ inputs.ksu }}-${{ inputs.droidspaces }}-${{ github.run_id }}
         restore-keys: |
-          ${{ runner.os }}-kernel-ccache-${{ github.event.inputs.device }}-
+          ${{ runner.os }}-kernel-ccache-${{ inputs.device }}-${{ inputs.ksu }}-${{ inputs.droidspaces }}-
+          ${{ runner.os }}-kernel-ccache-${{ inputs.device }}-
           ${{ runner.os }}-kernel-ccache-
 
     - name: Setup zyc-clang 16 Toolchain
       run: |
         mkdir -p $HOME/zyc-clang
         cd $HOME/zyc-clang
-        wget -q https://github.com/ZyCromerZ/Clang/releases/download/16.0.6-20260807-release/Clang-16.0.6-20260807.tar.gz
-        tar -zxvf Clang-16.0.6-20260807.tar.gz
+        URL=https://github.com/ZyCromerZ/Clang/releases/download/16.0.6-20260807-release/Clang-16.0.6-20260807.tar.gz
+        for attempt in 1 2 3 4; do
+          wget --timeout=120 --tries=2 -q -O clang.tar.gz "$URL" && break
+          echo "clang download attempt $attempt failed"
+          sleep 10
+        done
+        test -s clang.tar.gz || { echo "could not download zyc-clang"; exit 1; }
+        tar -zxf clang.tar.gz
+        # Register the toolchain's own lib dir (libclang.so.16, libomp.so,
+        # libomptarget.so.16, ...) with the loader: the release binaries
+        # carry no RPATH, so auxiliary tools cannot resolve them otherwise.
+        echo "$HOME/zyc-clang/lib" | sudo tee /etc/ld.so.conf.d/zyc-clang.conf >/dev/null
+        sudo ldconfig
+        "$HOME/zyc-clang/bin/clang" --version
+        # Ground-truth checks: ld.lld is the binary that needs the compat
+        # libs (libxml2.so.2, ICU 74). Fail here with the full list of
+        # missing libraries instead of dying mid-kernel-link later.
+        "$HOME/zyc-clang/bin/ld.lld" --version
+        MISSING="$(find "$HOME/zyc-clang/bin" -maxdepth 1 -type f -exec ldd {} + 2>/dev/null | grep 'not found' | awk '{print $1}' | sort -u || true)"
+        if [ -n "$MISSING" ]; then
+          echo "toolchain binaries report missing shared libraries:"
+          echo "$MISSING"
+          exit 1
+        fi
+        echo "no missing shared libraries in toolchain"
 
     - name: Run Build Script
       run: |
         chmod +x build_kernel.sh
-        
-        ARGS="${{ github.event.inputs.device }}"
-        
-        if [ "${{ github.event.inputs.ksu }}" == "true" ]; then
+
+        ARGS="${{ inputs.device }}"
+
+        if [ "${{ inputs.ksu }}" = "true" ]; then
           ARGS="$ARGS ksu"
         fi
-        
-        if [ "${{ github.event.inputs.target_os }}" != "both" ]; then
-          ARGS="$ARGS ${{ github.event.inputs.target_os }}"
+
+        if [ "${{ inputs.target_os }}" != "both" ]; then
+          ARGS="$ARGS ${{ inputs.target_os }}"
         fi
 
-        if [ "${{ github.event.inputs.droidspaces }}" == "true" ]; then
+        if [ "${{ inputs.droidspaces }}" = "true" ]; then
           ARGS="$ARGS droidspaces"
         fi
-        
+
         echo "Executing command: ./build_kernel.sh $ARGS"
         ./build_kernel.sh $ARGS
 
     - name: Upload Flashable ZIP
-      uses: actions/upload-artifact@v7
+      uses: actions/upload-artifact@v4
       with:
-        name: APTKernel-${{ github.event.inputs.device }}-${{ github.event.inputs.target_os }}-${{ github.run_id }}
+        name: APTKernel-${{ inputs.device }}-${{ inputs.target_os }}-${{ github.run_id }}
         path: APTKernel_*.zip
-        compression-level: 0 # 已经被 zip 压缩过，无需再二次压缩
+        compression-level: 0
