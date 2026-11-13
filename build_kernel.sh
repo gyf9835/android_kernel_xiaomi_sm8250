@@ -249,7 +249,7 @@ echo " [*] Initializing AnyKernel3 Workspace"
 echo "==========================================="
 rm -rf anykernel
 echo "[*] Cloning AnyKernel3..."
-git clone https://github.com/AstideLabs/AnyKernel3 -b kona --single-branch --depth=1 anykernel
+git clone https://github.com/UtsavBalar1231/AnyKernel3 -b kona --single-branch --depth=1 anykernel
 echo "[+] AnyKernel3 cloned successfully."
 echo "[*] Adjusting AnyKernel3..."
 sed -i -E "/^device\.name[0-9]*=/d" anykernel/anykernel.sh
