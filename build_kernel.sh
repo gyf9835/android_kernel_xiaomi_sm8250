@@ -106,7 +106,7 @@ fi
 # ==========================================
 # Baseband-guard Setup
 # ==========================================
-SKIP_BBG=1   # TEMP: boot-hang bisect on HyperOS, remove after diagnosis
+SKIP_BBG=0
 if [ "$SKIP_BBG" = "1" ]; then
     echo "[*] SKIP_BBG=1: skipping Baseband-guard entirely"
 fi
